@@ -1,3 +1,5 @@
+/* Shaders are inline because label rendering has a single fixed shader;
+ * no need to ship .glsl files separately. */
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
@@ -85,12 +87,23 @@ static GLuint compile_shaders(void) {
 
 label_renderer *label_renderer_create(const char *ttf_path, float font_size_px) {
     FILE *f = fopen(ttf_path, "rb");
-    if (!f) { xavaLog("label_renderer: cannot open font %s", ttf_path); return NULL; }
+    if (!f) { xavaWarn("label_renderer: cannot open font %s", ttf_path); return NULL; }
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     fseek(f, 0, SEEK_SET);
-    unsigned char *ttf = malloc(sz);
-    fread(ttf, 1, sz, f);
+    if (sz <= 0) {
+        xavaWarn("label_renderer: font file %s has invalid size %ld", ttf_path, sz);
+        fclose(f); return NULL;
+    }
+    unsigned char *ttf = malloc((size_t)sz);
+    if (!ttf) {
+        xavaWarn("label_renderer: failed to allocate %ld bytes for font", sz);
+        fclose(f); return NULL;
+    }
+    if (fread(ttf, 1, (size_t)sz, f) != (size_t)sz) {
+        xavaWarn("label_renderer: short read on font %s", ttf_path);
+        free(ttf); fclose(f); return NULL;
+    }
     fclose(f);
 
     label_renderer *lr = calloc(1, sizeof(*lr));
@@ -99,8 +112,12 @@ label_renderer *label_renderer_create(const char *ttf_path, float font_size_px) 
     lr->verts = malloc(sizeof(float) * 4 * lr->vert_capacity);
 
     unsigned char *bitmap = calloc(1, ATLAS_W * ATLAS_H);
-    stbtt_BakeFontBitmap(ttf, 0, font_size_px, bitmap,
+    int baked = stbtt_BakeFontBitmap(ttf, 0, font_size_px, bitmap,
         ATLAS_W, ATLAS_H, FIRST_CHAR, NUM_CHARS, lr->cdata);
+    if (baked <= 0) {
+        xavaWarn("label_renderer: atlas too small for %.0fpx font (baked=%d, requested %d glyphs); some labels will be missing",
+                 font_size_px, baked, NUM_CHARS);
+    }
     free(ttf);
 
     glGenTextures(1, &lr->atlas_tex);

@@ -28,7 +28,7 @@ static struct bar_labels_cfg {
     char        font[512];
     int         font_size_px;
     uint32_t    color_rgb;
-    int         hysteresis_frames;  /* reserved for Task 9 */
+    int         hysteresis_frames;  /* frames a sticky slot survives without a matching fresh peak */
 } cfg;
 
 /* module program handle — needed only for its .config field */
@@ -64,6 +64,7 @@ static label_mode parse_mode(const char *s) {
 
 EXP_FUNC void xava_gl_module_ionotify_callback(xava_ionotify_event event,
         const char *filename, int id, XAVA *xava) {
+    /* Live reload not supported — re-launch xava to pick up config changes. */
     UNUSED(filename); UNUSED(id); UNUSED(xava); UNUSED(event);
 }
 
@@ -100,7 +101,6 @@ EXP_FUNC void xava_gl_module_config_load(XAVAGLModule *module, XAVA *xava) {
     char *color_str = xavaConfigGetString(pre.config, "bar_labels", "color", "ffffff");
     cfg.color_rgb = (uint32_t)strtoul(color_str ? color_str : "ffffff", NULL, 16);
 
-    /* hysteresis_frames — read now, used in Task 9 */
     cfg.hysteresis_frames = xavaConfigGetI32(pre.config, "bar_labels", "hysteresis_frames", 8);
 
     xavaLog("bar_labels: config loaded — mode=%d min_height=%.2f max_peaks=%d "

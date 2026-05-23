@@ -9,7 +9,9 @@ typedef struct label_renderer label_renderer;
 label_renderer *label_renderer_create(const char *ttf_path, float font_size_px);
 void label_renderer_destroy(label_renderer *lr);
 
-// Stubs for Task 7 — defined here so main.c can already call them harmlessly.
+/* Per-frame text rendering — begin() clears the batched vertex buffer,
+ * draw_label() appends one glyph row (positions in pixel coords), flush()
+ * converts to NDC and issues one draw call. */
 void label_renderer_begin(label_renderer *lr);
 void label_renderer_draw_label(label_renderer *lr,
         const char *text,

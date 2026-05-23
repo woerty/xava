@@ -34,13 +34,9 @@ if(GL_MODULES)
         # this copies the dlls for mr. windows
         #find_and_copy_dlls(gl_bar_labels)
 
-        configure_file("${XAVA_MODULE_DIR}/vertex.glsl"   gl/module/bar_labels/vertex.glsl   COPYONLY)
-        configure_file("${XAVA_MODULE_DIR}/fragment.glsl" gl/module/bar_labels/fragment.glsl COPYONLY)
         configure_file("${XAVA_MODULE_DIR}/config.ini"    gl/module/bar_labels/config.ini   COPYONLY)
 
         install(TARGETS gl_bar_labels RENAME module DESTINATION share/xava/gl/module/bar_labels/)
-        install(FILES "${CMAKE_BINARY_DIR}/gl/module/bar_labels/vertex.glsl"   DESTINATION share/xava/gl/module/bar_labels/)
-        install(FILES "${CMAKE_BINARY_DIR}/gl/module/bar_labels/fragment.glsl" DESTINATION share/xava/gl/module/bar_labels/)
         install(FILES "${CMAKE_BINARY_DIR}/gl/module/bar_labels/config.ini"    DESTINATION share/xava/gl/module/bar_labels/)
 
         # Maybe GL license?

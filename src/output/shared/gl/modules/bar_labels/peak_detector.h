@@ -19,10 +19,13 @@ int peak_detector_find(
     peak_t *out
 );
 
-/* Sticky version: previous frame's peaks survive if no current candidate
- * exceeds them by 20% within `hysteresis_frames` frames. Caller owns
- * `last[]` and `last_age[]` across calls (size `max_peaks`).
- * `hysteresis_frames <= 0` disables stickiness. */
+/* Sticky version: one-to-one match between current and previous-frame peaks
+ * (a fresh peak claims at most one sticky slot if its bin is within +/-1).
+ * Claimed sticky slots reset their age and stay pinned at their original bin
+ * to keep label positions stable. Unclaimed sticky slots increment age and
+ * are dropped after hysteresis_frames without a match. Unclaimed fresh peaks
+ * are appended as new slots (capped at max_peaks). Caller owns last[] and
+ * last_age[] across calls. hysteresis_frames <= 0 disables stickiness. */
 int peak_detector_find_sticky(
     const uint32_t *bars, uint32_t n,
     double min_height_rel,
