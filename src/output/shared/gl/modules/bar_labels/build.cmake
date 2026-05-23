@@ -8,6 +8,7 @@ if(GL_MODULES)
     pkg_check_modules(GLEW QUIET glew)
     if(GLEW OR GLEW_FOUND)
         add_library(gl_bar_labels SHARED "${XAVA_MODULE_DIR}/main.c"
+                                          "${XAVA_MODULE_DIR}/label_renderer.c"
                                           "${XAVA_MODULE_DIR}/peak_detector.c"
                                           "${XAVA_MODULE_DIR}/note_naming.c"
                                           "${XAVA_MODULE_DIR}/../../util/shader.c"
@@ -16,7 +17,8 @@ if(GL_MODULES)
         target_link_directories(gl_bar_labels PRIVATE
             "${GLEW_LIBRARY_DIRS}")
         target_include_directories(gl_bar_labels PRIVATE
-            "${GLEW_INCLUDE_DIRS}")
+            "${GLEW_INCLUDE_DIRS}"
+            "${CMAKE_SOURCE_DIR}/lib/stb")
 
         if(WINDOWS OR MINGW OR MSVC OR CYGWIN)
             target_link_libraries(gl_bar_labels xava-shared "-lglew32 -lopengl32")
