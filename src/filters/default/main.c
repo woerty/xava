@@ -251,6 +251,30 @@ EXP_FUNC void xavaFilterApply(XAVA *xava) {
 
     if (p->stereo)
         xava->bars = xava->bars * 2;
+
+    // Expose per-bar frequency ranges (Hz) to other modules.
+    // In stereo the layout is mirrored: bars 0..bars/2-1 are the left channel
+    // in reverse order (bar 0 = highest freq), bars bars/2..bars-1 are the
+    // right channel in forward order (bar bars/2 = lowest freq).  Both channels
+    // share the same lcf/hcf tables (indexed 0 = lowest frequency), so the
+    // mapping is:
+    //   i < bars/2  →  band index = bars/2 - 1 - i   (mirrored left)
+    //   i >= bars/2 →  band index = i - bars/2        (forward right)
+    xava->bar_freq_lo = realloc(xava->bar_freq_lo, sizeof(double) * xava->bars);
+    xava->bar_freq_hi = realloc(xava->bar_freq_hi, sizeof(double) * xava->bars);
+    for (uint32_t o = 0; o < xava->bars; o++) {
+        uint32_t band;
+        if (p->stereo) {
+            if (o < xava->bars / 2)
+                band = xava->bars / 2 - 1 - o;
+            else
+                band = o - xava->bars / 2;
+        } else {
+            band = o;
+        }
+        xava->bar_freq_lo[o] = (double)data->lcf[band] * xava->audio.rate / (double)xava->audio.fftsize;
+        xava->bar_freq_hi[o] = (double)data->hcf[band] * xava->audio.rate / (double)xava->audio.fftsize;
+    }
 }
 
 EXP_FUNC void xavaFilterLoop(XAVA *xava) {
@@ -400,6 +424,9 @@ EXP_FUNC void xavaFilterCleanup(XAVA *xava) {
     arr_free(data->fall);
     arr_free(data->fl);
     arr_free(data->fr);
+
+    free(xava->bar_freq_lo); xava->bar_freq_lo = NULL;
+    free(xava->bar_freq_hi); xava->bar_freq_hi = NULL;
 
     free(data);
 }

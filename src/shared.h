@@ -423,6 +423,11 @@ typedef struct XAVA {
     uint32_t rest;        // number of screen units until first bar
     uint32_t *f, *fl;     // array to bar data (f = current, fl = last frame)
 
+    // Frequency boundaries per bar (Hz), populated by the active filter
+    // during apply(). Length = bars. NULL until filter has applied.
+    double *bar_freq_lo;
+    double *bar_freq_hi;
+
     // signals to the renderer thread to safely stop rendering (if needed)
     bool pauseRendering;
 
