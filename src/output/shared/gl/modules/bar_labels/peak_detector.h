@@ -19,4 +19,17 @@ int peak_detector_find(
     peak_t *out
 );
 
+/* Sticky version: previous frame's peaks survive if no current candidate
+ * exceeds them by 20% within `hysteresis_frames` frames. Caller owns
+ * `last[]` and `last_age[]` across calls (size `max_peaks`).
+ * `hysteresis_frames <= 0` disables stickiness. */
+int peak_detector_find_sticky(
+    const uint32_t *bars, uint32_t n,
+    double min_height_rel,
+    int max_peaks,
+    peak_t *last, int *last_age,
+    int last_count,
+    int hysteresis_frames
+);
+
 #endif

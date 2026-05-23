@@ -36,6 +36,12 @@ static xava_gl_module_program pre;
 
 static label_renderer *g_lr = NULL;
 
+/* ---- hysteresis state ---- */
+#define MAX_PEAKS_HARD 16
+static peak_t g_last_peaks[MAX_PEAKS_HARD];
+static int    g_last_age[MAX_PEAKS_HARD];
+static int    g_last_count = 0;
+
 /* ---- helpers ---- */
 static label_mode parse_mode(const char *s) {
     if (!s)                              return MODE_NOTE;
@@ -105,6 +111,8 @@ EXP_FUNC void xava_gl_module_init(XAVAGLModuleOptions *options) {
 
 EXP_FUNC void xava_gl_module_apply(XAVAGLModuleOptions *options) {
     UNUSED(options);
+    g_last_count = 0;
+    memset(g_last_age, 0, sizeof(g_last_age));
     xavaLog("bar_labels: apply");
 }
 
@@ -121,17 +129,15 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
     if (!g_lr || cfg.mode == MODE_OFF) return;
     if (xava->bars < 3 || !xava->bar_freq_lo) return;
 
-    peak_t peaks[16];
-    int max_p = cfg.max_peaks > 16 ? 16 : cfg.max_peaks;
-    int np = peak_detector_find(xava->f, xava->bars,
-                                cfg.min_height,
-                                max_p,
-                                peaks);
+    int max_n = cfg.max_peaks > MAX_PEAKS_HARD ? MAX_PEAKS_HARD : cfg.max_peaks;
+    int np = peak_detector_find_sticky(xava->f, xava->bars, cfg.min_height,
+        max_n, g_last_peaks, g_last_age, g_last_count, cfg.hysteresis_frames);
+    g_last_count = np;
 
     label_renderer_begin(g_lr);
 
     for (int i = 0; i < np; i++) {
-        uint32_t bin = peaks[i].bin;
+        uint32_t bin = g_last_peaks[i].bin;
         double f_lo = xava->bar_freq_lo[bin];
         double f_hi = xava->bar_freq_hi[bin];
         double hz = sqrt(f_lo * f_hi);
@@ -167,7 +173,7 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
                   + (float)bin * bar_pixel_w
                   + (float)xava->conf.bw / 2.0f
                   - (float)cfg.font_size_px * 1.5f;
-        float bar_top_px = (float)xava->inner.h - (float)peaks[i].height;
+        float bar_top_px = (float)xava->inner.h - (float)g_last_peaks[i].height;
         float y = bar_top_px - 4.0f;
         /* If label would clip off the top, push it below the bar top instead */
         if (y < (float)cfg.font_size_px)

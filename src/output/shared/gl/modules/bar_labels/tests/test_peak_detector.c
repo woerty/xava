@@ -52,6 +52,46 @@ static void test_edge_bins_ignored(void) {
     assert(n == 0);
 }
 
+static void test_hysteresis_sticky(void) {
+    peak_t last[3] = {0};
+    int last_age[3] = {0};
+    int last_n = 0;
+
+    /* Frame 1: spike at bin 5, height 10 */
+    uint32_t bars1[10] = {0,0,0,0,0,10,0,0,0,0};
+    last_n = peak_detector_find_sticky(bars1, 10, 0.0, 3,
+                                       last, last_age, last_n, 8);
+    assert(last_n == 1 && last[0].bin == 5);
+
+    /* Frame 2: spike moved to bin 6, height 11 (< 20% above 10 → sticky) */
+    uint32_t bars2[10] = {0,0,0,0,0,0,11,0,0,0};
+    last_n = peak_detector_find_sticky(bars2, 10, 0.0, 3,
+                                       last, last_age, last_n, 8);
+    assert(last_n == 1 && last[0].bin == 5);  /* still bin 5 */
+
+    /* Frame 3: spike at bin 6 jumps to 20 (>20% above 10 → kicks) */
+    uint32_t bars3[10] = {0,0,0,0,0,0,20,0,0,0};
+    last_n = peak_detector_find_sticky(bars3, 10, 0.0, 3,
+                                       last, last_age, last_n, 8);
+    assert(last_n == 1 && last[0].bin == 6);
+}
+
+static void test_hysteresis_disabled(void) {
+    peak_t last[3] = {0};
+    int last_age[3] = {0};
+    int last_n = 0;
+
+    uint32_t bars[10] = {0,0,0,0,0,10,0,0,0,0};
+    last_n = peak_detector_find_sticky(bars, 10, 0.0, 3,
+                                       last, last_age, last_n, 0);
+    assert(last_n == 1 && last[0].bin == 5);
+    /* With hysteresis_frames=0, second call should immediately adopt new */
+    uint32_t bars2[10] = {0,0,0,0,0,0,7,0,0,0};
+    last_n = peak_detector_find_sticky(bars2, 10, 0.0, 3,
+                                       last, last_age, last_n, 0);
+    assert(last_n == 1 && last[0].bin == 6);
+}
+
 int main(void) {
     test_constant_array_no_peaks();
     test_single_spike();
@@ -59,6 +99,8 @@ int main(void) {
     test_plateau_no_peak();
     test_min_height_filter();
     test_edge_bins_ignored();
+    test_hysteresis_sticky();
+    test_hysteresis_disabled();
     printf("test_peak_detector: OK\n");
     return 0;
 }
