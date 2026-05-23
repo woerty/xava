@@ -38,7 +38,16 @@ EXP_FUNC void xava_gl_module_clear(XAVAGLModuleOptions *options) {
 }
 
 EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
-    UNUSED(options);
+    XAVA *xava = options->xava;
+    if (!g_lr) return;
+
+    label_renderer_begin(g_lr);
+    label_renderer_draw_label(g_lr, "TEST",
+        (float)xava->inner.w / 2.0f - 30.0f,
+        (float)xava->inner.h / 2.0f);
+    label_renderer_flush(g_lr,
+        xava->outer.w, xava->outer.h,
+        1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 EXP_FUNC void xava_gl_module_cleanup(XAVAGLModuleOptions *options) {

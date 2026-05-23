@@ -40,6 +40,16 @@ static const char *FS_SRC =
     "out vec4 frag;\n"
     "void main() { float a = texture(atlas, v_uv).r; frag = vec4(color.rgb, color.a * a); }\n";
 
+static void push_vertex(label_renderer *lr, float x, float y, float u, float v) {
+    if (lr->vert_count >= lr->vert_capacity) {
+        lr->vert_capacity *= 2;
+        lr->verts = realloc(lr->verts, sizeof(float) * 4 * lr->vert_capacity);
+    }
+    float *p = lr->verts + lr->vert_count * 4;
+    p[0] = x; p[1] = y; p[2] = u; p[3] = v;
+    lr->vert_count++;
+}
+
 static GLuint compile_one(GLenum type, const char *src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, NULL);
@@ -120,11 +130,54 @@ void label_renderer_destroy(label_renderer *lr) {
     free(lr);
 }
 
-void label_renderer_begin(label_renderer *lr) { if (lr) lr->vert_count = 0; }
-void label_renderer_draw_label(label_renderer *lr, const char *text, float x, float y) {
-    (void)lr; (void)text; (void)x; (void)y;
+void label_renderer_begin(label_renderer *lr) {
+    if (lr) lr->vert_count = 0;
 }
+
+void label_renderer_draw_label(label_renderer *lr, const char *text, float x, float y) {
+    if (!lr || !text) return;
+    for (const char *c = text; *c; c++) {
+        if ((unsigned char)*c < FIRST_CHAR || (unsigned char)*c >= FIRST_CHAR + NUM_CHARS) continue;
+        stbtt_aligned_quad q;
+        stbtt_GetBakedQuad(lr->cdata, ATLAS_W, ATLAS_H,
+                           (unsigned char)*c - FIRST_CHAR, &x, &y, &q, 1);
+        /* Two triangles per glyph quad. Pixel coords converted to NDC in flush. */
+        push_vertex(lr, q.x0, q.y0, q.s0, q.t0);
+        push_vertex(lr, q.x1, q.y0, q.s1, q.t0);
+        push_vertex(lr, q.x1, q.y1, q.s1, q.t1);
+        push_vertex(lr, q.x0, q.y0, q.s0, q.t0);
+        push_vertex(lr, q.x1, q.y1, q.s1, q.t1);
+        push_vertex(lr, q.x0, q.y1, q.s0, q.t1);
+    }
+}
+
 void label_renderer_flush(label_renderer *lr, int sw, int sh,
         float r, float g, float b, float a) {
-    (void)lr; (void)sw; (void)sh; (void)r; (void)g; (void)b; (void)a;
+    if (!lr || lr->vert_count == 0) return;
+
+    /* Convert pixel coords to NDC in place. Y is flipped (pixel-y down, NDC up). */
+    for (int i = 0; i < lr->vert_count; i++) {
+        float *p = lr->verts + i * 4;
+        p[0] = (p[0] / (float)sw) * 2.0f - 1.0f;
+        p[1] = 1.0f - (p[1] / (float)sh) * 2.0f;
+    }
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(lr->program);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, lr->atlas_tex);
+    glUniform1i(lr->u_atlas, 0);
+    glUniform4f(lr->u_color, r, g, b, a);
+
+    glBindVertexArray(lr->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, lr->vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 sizeof(float) * 4 * lr->vert_count,
+                 lr->verts, GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, lr->vert_count);
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
 }
