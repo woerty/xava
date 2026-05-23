@@ -26,19 +26,25 @@ struct label_renderer {
 };
 
 static const char *VS_SRC =
-    "#version 330 core\n"
+    "#version 420 core\n"
     "layout(location=0) in vec2 pos;\n"
     "layout(location=1) in vec2 uv;\n"
     "out vec2 v_uv;\n"
-    "void main() { v_uv = uv; gl_Position = vec4(pos, 0.0, 1.0); }\n";
+    "void main() {\n"
+    "  v_uv = uv;\n"
+    "  gl_Position = vec4(pos, 0.0, 1.0);\n"
+    "}\n";
 
 static const char *FS_SRC =
-    "#version 330 core\n"
+    "#version 420 core\n"
     "in vec2 v_uv;\n"
     "uniform sampler2D atlas;\n"
     "uniform vec4 color;\n"
-    "out vec4 frag;\n"
-    "void main() { float a = texture(atlas, v_uv).r; frag = vec4(color.rgb, color.a * a); }\n";
+    "layout(location=0) out vec4 frag;\n"
+    "void main() {\n"
+    "  float a = texture(atlas, v_uv).r;\n"
+    "  frag = vec4(color.rgb, color.a * a);\n"
+    "}\n";
 
 static void push_vertex(label_renderer *lr, float x, float y, float u, float v) {
     if (lr->vert_count >= lr->vert_capacity) {
@@ -56,8 +62,8 @@ static GLuint compile_one(GLenum type, const char *src) {
     glCompileShader(s);
     GLint ok; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
     if (!ok) {
-        char log[1024]; glGetShaderInfoLog(s, sizeof(log), NULL, log);
-        xavaLog("label_renderer: shader compile error: %s", log);
+        char info[1024]; glGetShaderInfoLog(s, sizeof(info), NULL, info);
+        xavaWarn("label_renderer: shader compile error (type=%d): %s", type, info);
     }
     return s;
 }
@@ -68,6 +74,11 @@ static GLuint compile_shaders(void) {
     GLuint p = glCreateProgram();
     glAttachShader(p, vs); glAttachShader(p, fs);
     glLinkProgram(p);
+    GLint linked; glGetProgramiv(p, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char info[1024]; glGetProgramInfoLog(p, sizeof(info), NULL, info);
+        xavaWarn("label_renderer: program link error: %s", info);
+    }
     glDeleteShader(vs); glDeleteShader(fs);
     return p;
 }
@@ -116,6 +127,11 @@ label_renderer *label_renderer_create(const char *ttf_path, float font_size_px) 
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float)*4, (void*)(sizeof(float)*2));
     glBindVertexArray(0);
+    /* Restore the global GL_ARRAY_BUFFER binding so we don't poison other
+     * modules (especially the post pass) which use client-side vertex arrays
+     * via glVertexAttribPointer(..., cpu_ptr). With our VBO still bound, that
+     * CPU pointer would be interpreted as a VBO offset and read garbage. */
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     return lr;
 }
@@ -176,8 +192,10 @@ void label_renderer_flush(label_renderer *lr, int sw, int sh,
     glBufferData(GL_ARRAY_BUFFER,
                  sizeof(float) * 4 * lr->vert_count,
                  lr->verts, GL_DYNAMIC_DRAW);
-    glDrawArrays(GL_TRIANGLES, 0, lr->vert_count);
-    glBindVertexArray(0);
 
-    glDisable(GL_BLEND);
+    glDrawArrays(GL_TRIANGLES, 0, lr->vert_count);
+
+    glBindVertexArray(0);
+    /* Restore the global GL_ARRAY_BUFFER binding (see comment in create()). */
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
