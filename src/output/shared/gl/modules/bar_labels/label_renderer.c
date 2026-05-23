@@ -198,4 +198,11 @@ void label_renderer_flush(label_renderer *lr, int sw, int sh,
     glBindVertexArray(0);
     /* Restore the global GL_ARRAY_BUFFER binding (see comment in create()). */
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    /* Restore XAVA's per-frame blend setup so the post pass sees the state it
+     * configured in SGLDraw (RGB additive, Alpha MAX). Otherwise the post pass
+     * runs with our standard alpha blend and the window flickers between
+     * different transparency levels each frame. */
+    glBlendEquationSeparate(GL_FUNC_ADD, GL_MAX);
+    glBlendFuncSeparate(GL_ONE, GL_ONE, GL_SRC_ALPHA, GL_DST_ALPHA);
 }
