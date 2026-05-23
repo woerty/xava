@@ -38,9 +38,16 @@ static label_renderer *g_lr = NULL;
 
 /* ---- hysteresis state ---- */
 #define MAX_PEAKS_HARD 16
-static peak_t g_last_peaks[MAX_PEAKS_HARD];
-static int    g_last_age[MAX_PEAKS_HARD];
-static int    g_last_count = 0;
+static peak_t   g_last_peaks[MAX_PEAKS_HARD];
+static int      g_last_age[MAX_PEAKS_HARD];
+static int      g_last_count = 0;
+
+/* Per-slot smoothed bar-top height (pixels). Resets when the slot's
+ * bin changes; otherwise low-passed against current xava->f[bin] to
+ * keep label-y from jittering frame-to-frame. */
+static float    g_smooth_h[MAX_PEAKS_HARD];
+static uint32_t g_smooth_bin[MAX_PEAKS_HARD];
+static int      g_smooth_valid[MAX_PEAKS_HARD];
 
 /* ---- helpers ---- */
 static label_mode parse_mode(const char *s) {
@@ -113,6 +120,7 @@ EXP_FUNC void xava_gl_module_apply(XAVAGLModuleOptions *options) {
     UNUSED(options);
     g_last_count = 0;
     memset(g_last_age, 0, sizeof(g_last_age));
+    memset(g_smooth_valid, 0, sizeof(g_smooth_valid));
     xavaLog("bar_labels: apply");
 }
 
@@ -135,6 +143,12 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
     g_last_count = np;
 
     label_renderer_begin(g_lr);
+
+    /* Skip labels that would overlap a previously drawn one this frame.
+     * Approx label width = font_size_px * 4 (covers "A#4 / 1234 Hz" worst-case). */
+    float drawn_x[MAX_PEAKS_HARD];
+    int   drawn_n = 0;
+    float min_dx = (float)cfg.font_size_px * 4.0f;
 
     for (int i = 0; i < np; i++) {
         uint32_t bin = g_last_peaks[i].bin;
@@ -173,7 +187,17 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
                   + (float)bin * bar_pixel_w
                   + (float)xava->conf.bw / 2.0f
                   - (float)cfg.font_size_px * 1.5f;
-        float bar_top_px = (float)xava->inner.h - (float)g_last_peaks[i].height;
+        /* Smooth bar-top height per slot to reduce vertical label jitter.
+         * Reset when bin changes; otherwise EMA with alpha=0.15 (lag ~6 frames). */
+        float cur_h = (float)xava->f[bin];
+        if (!g_smooth_valid[i] || g_smooth_bin[i] != bin) {
+            g_smooth_h[i]     = cur_h;
+            g_smooth_bin[i]   = bin;
+            g_smooth_valid[i] = 1;
+        } else {
+            g_smooth_h[i] = g_smooth_h[i] * 0.93f + cur_h * 0.07f;
+        }
+        float bar_top_px = (float)xava->inner.h - g_smooth_h[i];
         float y = bar_top_px - 4.0f;
         /* If label would clip off the top, push it below the bar top instead */
         if (y < (float)cfg.font_size_px)
@@ -182,6 +206,16 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
         /* Account for inner offset within outer window */
         x += (float)xava->inner.x;
         y += (float)xava->inner.y;
+
+        /* Skip labels that would overlap a previously drawn one this frame. */
+        bool overlap = false;
+        for (int k = 0; k < drawn_n; k++) {
+            float dx = x - drawn_x[k];
+            if (dx < 0) dx = -dx;
+            if (dx < min_dx) { overlap = true; break; }
+        }
+        if (overlap) continue;
+        drawn_x[drawn_n++] = x;
 
         label_renderer_draw_label(g_lr, text, x, y);
     }

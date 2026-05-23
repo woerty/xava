@@ -64,49 +64,52 @@ int peak_detector_find_sticky(
         return fn;
     }
 
-    /* Track which fresh peaks were evaluated as kick candidates so they are
-     * not also appended as extra peaks (avoids count inflation from adjacent
-     * bins that lost the hysteresis check). */
-    bool fresh_used[16] = {false};
+    /* One-to-one matching between sticky slots and fresh peaks:
+     *
+     * Each fresh peak can claim AT MOST one sticky slot (within +/-1 bin).
+     * Matched sticky stays pinned at its original bin (no horizontal jitter),
+     * only its age resets. Unmatched sticky ages out after hysteresis_frames.
+     * Unclaimed fresh peaks are appended as new slots.
+     *
+     * This prevents two failure modes:
+     *  - All slots collapsing to the loudest peak (old code kicked every
+     *    slot to fresh[0] in parallel)
+     *  - Sticky bin wobbling between adjacent bins frame-to-frame */
+    bool fresh_claimed[16] = {false};
+    int kept = 0;
 
-    /* For each previous peak: if a fresh peak is >20% taller, adopt it;
-     * otherwise age the sticky peak. Expired peaks get replaced by the
-     * strongest fresh peak. */
     for (int i = 0; i < last_count; i++) {
-        bool kicked = false;
+        int match = -1;
         for (int j = 0; j < fn; j++) {
-            fresh_used[j] = true;  /* evaluated against this sticky slot */
-            if ((double)fresh[j].height > (double)last[i].height * 1.20) {
-                last[i] = fresh[j];
-                last_age[i] = 0;
-                kicked = true;
-                break;
-            }
+            if (fresh_claimed[j]) continue;
+            int dbin = (int)fresh[j].bin - (int)last[i].bin;
+            if (dbin >= -1 && dbin <= 1) { match = j; break; }
         }
-        if (!kicked) {
-            last_age[i]++;
-            if (last_age[i] > hysteresis_frames && fn > 0) {
-                last[i] = fresh[0];
-                last_age[i] = 0;
+        if (match >= 0) {
+            /* Region still active — keep sticky bin/height, refresh age */
+            if (kept != i) last[kept] = last[i];
+            last_age[kept] = 0;
+            fresh_claimed[match] = true;
+            kept++;
+        } else {
+            /* No nearby fresh — age, drop if expired */
+            int new_age = last_age[i] + 1;
+            if (new_age <= hysteresis_frames) {
+                if (kept != i) last[kept] = last[i];
+                last_age[kept] = new_age;
+                kept++;
             }
         }
     }
 
-    /* Append fresh peaks that weren't evaluated as kick candidates and aren't
-     * already in last[] (up to max_peaks). These represent genuinely new
-     * spectral features beyond the existing sticky peaks. */
-    int out_n = last_count;
+    /* Append fresh peaks that no sticky claimed — these are new spectral
+     * features and deserve their own label slot. */
+    int out_n = kept;
     for (int j = 0; j < fn && out_n < max_peaks; j++) {
-        if (fresh_used[j]) continue;
-        bool already = false;
-        for (int i = 0; i < out_n; i++) {
-            if (last[i].bin == fresh[j].bin) { already = true; break; }
-        }
-        if (!already) {
-            last[out_n] = fresh[j];
-            last_age[out_n] = 0;
-            out_n++;
-        }
+        if (fresh_claimed[j]) continue;
+        last[out_n] = fresh[j];
+        last_age[out_n] = 0;
+        out_n++;
     }
     return out_n;
 }
