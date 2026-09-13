@@ -131,7 +131,7 @@ static struct zwlr_alignment_info handle_window_alignment(XAVA_CONFIG *p) {
 void zwlr_init(struct waydata *wd) {
     XAVA     *hand   = wd->hand;
     XAVA_CONFIG   *p      = &hand->conf;
-    struct wlOutput        *output = wl_output_get_desired();
+    struct wlOutput        *output = wl_output_get_desired(wd);
 
     // Create a "wallpaper" surface
     xavaWLRLayerSurface = zwlr_layer_shell_v1_get_layer_surface(

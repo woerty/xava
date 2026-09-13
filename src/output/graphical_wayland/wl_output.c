@@ -77,7 +77,7 @@ struct wlOutput *wl_output_get_desired(struct waydata *wd) {
     lastGood = NULL; // supress warnings by GCC
 
     wl_list_for_each_safe(output, tmp, &wd->outputs, link) {
-        if(!strcmp(output->name, monitorName)) {
+        if(output->name && !strcmp(output->name, monitorName)) {
             return output;
         } else lastGood = output;
     }

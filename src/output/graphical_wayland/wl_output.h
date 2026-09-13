@@ -25,7 +25,7 @@ extern struct zxdg_output_manager_v1   *xavaXDGOutputManager;
 extern struct zxdg_output_v1_listener  xdg_output_listener;
 extern const struct wl_output_listener output_listener;
 
-struct wlOutput *wl_output_get_desired();
+struct wlOutput *wl_output_get_desired(struct waydata *wd);
 extern void wl_output_cleanup(struct waydata *wd);
 extern void wl_output_init(struct waydata *wd);
 

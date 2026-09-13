@@ -59,14 +59,33 @@ static void xava_wl_registry_global_listener(void *data, struct wl_registry *wl_
 static void xava_wl_registry_global_remove(void *data, struct wl_registry *wl_registry,
         uint32_t name) {
     UNUSED(wl_registry);
-    UNUSED(name);
 
     struct waydata           *wd   = data;
+    struct wlOutput          *output, *tmp;
 
-    // This sometimes happens when displays get reconfigured
-    pushXAVAEventStack(wd->events, XAVA_RELOAD);
+    wl_list_for_each_safe(output, tmp, &wd->outputs, link) {
+        if(output->id != name)
+            continue;
 
-    xavaLog("wl_registry died");
+        // Only our own output going away requires a reload; any other
+        // output (e.g. an unplugged second monitor) is simply forgotten.
+        if(output == wl_output_get_desired(wd)) {
+            xavaLog("Output %s removed, reloading", output->name);
+            pushXAVAEventStack(wd->events, XAVA_RELOAD);
+            return;
+        }
+
+        xavaLog("Output %s removed", output->name);
+        wl_list_remove(&output->link);
+        if(output->xdg_output)
+            zxdg_output_v1_destroy(output->xdg_output);
+        wl_output_destroy(output->output);
+        free(output->name);
+        free(output);
+        return;
+    }
+
+    // not an output, nothing we depend on
 }
 
 const struct wl_registry_listener xava_wl_registry_listener = {
