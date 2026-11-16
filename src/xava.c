@@ -296,7 +296,7 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
         audio->fftsize   = p->fftsize;
         audio->format    = -1;
         audio->terminate = 0;
-        audio->channels  = 1 + p->stereo;
+        audio->channels  = 1 + (p->stereo || p->stereo_diff);
         audio->rate      = p->samplerate;
         audio->latency   = p->samplelatency;
 
@@ -309,9 +309,9 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
 
         // setup audio garbo
         MALLOC_SELF(audio->audio_out_l, p->fftsize+1);
-        if(p->stereo)
+        if(audio->channels == 2)
             MALLOC_SELF(audio->audio_out_r, p->fftsize+1);
-        if(p->stereo) {
+        if(audio->channels == 2) {
             for (uint32_t i = 0; i < audio->fftsize; i++) {
                 audio->audio_out_l[i] = 0;
                 audio->audio_out_r[i] = 0;
@@ -402,7 +402,7 @@ as of 0.4.0 all options are specified in config file, see in '/home/username/.co
                     }
                 }
 
-                if(p->stereo) {
+                if(audio->channels == 2) {
                     for (uint32_t i = 0; i < audio->fftsize; i++) {
                         if(audio->audio_out_r[i]) {
                             silence = 0;

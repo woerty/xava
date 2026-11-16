@@ -99,13 +99,20 @@ void validate_config(XAVA *hand, xava_config_source config) {
 
     // validate: output channels
     int stereo = -1;
+    bool stereo_diff = false;
     if (strcmp(channels, "mono") == 0)   stereo = 0;
     if (strcmp(channels, "stereo") == 0) stereo = 1;
+    if (strcmp(channels, "difference") == 0) {
+        stereo = 0;
+        stereo_diff = true;
+    }
     xavaBailCondition(stereo == -1, "Output channels '%s' is not supported,"
-            " supported channels are", " 'mono' and 'stereo'", channels);
+            " supported channels are 'mono', 'stereo' and 'difference'", channels);
 
     // validate: input
     p->stereo = stereo ? 1 : 0; // makes the C compilers happy
+    p->stereo_diff = stereo_diff;
+    p->stereo_diff_is_set_from_file = channels_is_set_from_file;
     p->stereo_is_set_from_file = channels_is_set_from_file;
     xavaBailCondition(!p->samplerate, "samplerate CANNOT BE 0!");
     xavaBailCondition(p->samplelatency > p->inputsize, "Sample latency cannot be larger than the audio buffer itself!");

@@ -254,10 +254,14 @@
 #   win_opengl, win_cairo, sdl2_opengl and the "unsupported" ncurses mode
 ; method = opengl
 
-# Visual channels. Can be 'stereo' or 'mono'.
+# Visual channels. Can be 'stereo', 'mono' or 'difference'.
 # 'stereo' mirrors both channels with low frequencies in center.
 # 'mono' averages both channels and outputs left to right lowest to highest
 # frequencies.
+# 'difference' uses the mono layout, but every bar also shows how much of it
+# differs between the left and right channel (panning, stereo width, reverb).
+# The bars keep the height of 'mono', their top part is drawn in
+# [color] difference according to that share (OpenGL bars only).
 ; channels = mono
 
 
@@ -287,6 +291,9 @@
 ; gradient_count = 0
 ; gradient_color_1 = '#0099ff'
 ; gradient_color_2 = '#ff3399'
+
+# Colour of the left/right difference when [output] channels = difference
+; difference = '#ff9e3d'
 
 
 [filter]

@@ -63,6 +63,8 @@ typedef struct XAVA_CONFIG {
     XAVA_CONFIG_OPTION(i32,  fixedbars);
     XAVA_CONFIG_OPTION(bool, autobars);
     XAVA_CONFIG_OPTION(bool, stereo);
+    XAVA_CONFIG_OPTION(bool, stereo_diff); // mono layout, but capture L+R and
+                                           // expose the L-R share per bar
     XAVA_CONFIG_OPTION(bool, autosens);
 
     XAVA_CONFIG_OPTION(u32, fftsize);
@@ -427,6 +429,11 @@ typedef struct XAVA {
     // during apply(). Length = bars. NULL until filter has applied.
     double *bar_freq_lo;
     double *bar_freq_hi;
+
+    // Only with channels = difference: share (0..1) of every bar that comes
+    // from the difference between left and right (the "side" signal).
+    // Length = bars. NULL when the mode is off.
+    float *side_ratio;
 
     // signals to the renderer thread to safely stop rendering (if needed)
     bool pauseRendering;

@@ -18,6 +18,10 @@
 #define GRAVITY_SCALE    (50.0/100.0)
 #define INTEGRAL_SCALE   0.01
 
+// channels = difference: how fast the per-bar side share follows the music
+// (fraction of the way to the new value per frame)
+#define SIDE_RATIO_SMOOTHING 0.3f
+
 typedef struct XAVA_FILTER_CONFIG {
     const uint32_t lowcf, highcf; // low and high cutoff frequency
     const uint32_t overshoot;
@@ -49,6 +53,11 @@ typedef struct XAVA_FILTER_DATA {
     fftwf_plan pl, pr;
     fftwf_complex *outl, *outr;
 
+    // channels = difference: mid (L+R)/2 and side (L-R)/2 FFT inputs and the
+    // smoothed side share per frequency band (0..1)
+    float    *mid, *side;
+    float    *sratio;
+
     bool senseLow;
     const XAVA_FILTER_CONFIG config;
     XAVA_FILTER_CONFIG state;
@@ -79,6 +88,34 @@ void separate_freq_bands(fftwf_complex *out,
         if (temp <= data->state.ignore) temp = 0;
         if (channel == 1) data->fl[o] = temp;
         else data->fr[o] = temp;
+    }
+}
+
+// channels = difference: the bar height is the mid (L+R)/2 magnitude of the
+// band, exactly like 'mono'. Next to it the share of the side (L-R)/2 signal,
+// s / (m + s), is kept so the output can colour that part of the bar.
+void separate_freq_bands_diff(fftwf_complex *mid,
+        fftwf_complex *side,
+        double sens,
+        XAVA_FILTER_DATA *data) {
+    for (uint32_t o = 0; o < data->calcbars; o++) {
+        double m = 0.0, s = 0.0;
+
+        for (uint32_t i = data->lcf[o]; i <= data->hcf[o]; i++) {
+            m += hypot(mid[i][0],  mid[i][1]);
+            s += hypot(side[i][0], side[i][1]);
+        }
+
+        uint32_t count = data->hcf[o] - data->lcf[o] + 1;
+        m /= count;
+        s /= count;
+
+        double temp = m * sens * data->k[o] / 800000;
+        if (temp <= data->state.ignore) temp = 0;
+        data->fl[o] = temp;
+
+        float ratio = (m + s > 0.0) ? (float)(s / (m + s)) : 0.0f;
+        data->sratio[o] += (ratio - data->sratio[o]) * SIDE_RATIO_SMOOTHING;
     }
 }
 
@@ -125,7 +162,15 @@ EXP_FUNC int xavaFilterInit(XAVA *xava) {
 
     // fft: planning to rock
     CALLOC_SELF(data->outl, audio->fftsize/2+1);
-    data->pl = fftwf_plan_dft_r2c_1d(audio->fftsize, audio->audio_out_l, data->outl, FFTW_MEASURE);
+    if(p->stereo_diff) {
+        data->mid  = fftwf_alloc_real(audio->fftsize);
+        data->side = fftwf_alloc_real(audio->fftsize);
+        CALLOC_SELF(data->outr, audio->fftsize/2+1);
+        data->pl = fftwf_plan_dft_r2c_1d(audio->fftsize, data->mid,  data->outl, FFTW_MEASURE);
+        data->pr = fftwf_plan_dft_r2c_1d(audio->fftsize, data->side, data->outr, FFTW_MEASURE);
+    } else {
+        data->pl = fftwf_plan_dft_r2c_1d(audio->fftsize, audio->audio_out_l, data->outl, FFTW_MEASURE);
+    }
 
     if(p->stereo) {
         CALLOC_SELF(data->outr, audio->fftsize/2+1);
@@ -146,6 +191,7 @@ EXP_FUNC int xavaFilterInit(XAVA *xava) {
     arr_init_n(data->fall,   xava->bars);
     arr_init_n(data->fl,     xava->bars);
     arr_init_n(data->fr,     xava->bars);
+    arr_init_n(data->sratio, xava->bars);
 
     return 0;
 }
@@ -169,6 +215,7 @@ EXP_FUNC void xavaFilterApply(XAVA *xava) {
     arr_resize(data->fall,   xava->bars);
     arr_resize(data->fl,     xava->bars);
     arr_resize(data->fr,     xava->bars);
+    arr_resize(data->sratio, xava->bars);
 
     // oddoneout only works if the number of bars is odd, go figure
     if(data->state.oddoneout) {
@@ -192,6 +239,7 @@ EXP_FUNC void xavaFilterApply(XAVA *xava) {
         data->hcf[i] = 0;
         data->fl[i] = 0;
         data->fr[i] = 0;
+        data->sratio[i] = 0;
         data->k[i] = .0;
     }
 
@@ -275,6 +323,12 @@ EXP_FUNC void xavaFilterApply(XAVA *xava) {
         xava->bar_freq_lo[o] = (double)data->lcf[band] * xava->audio.rate / (double)xava->audio.fftsize;
         xava->bar_freq_hi[o] = (double)data->hcf[band] * xava->audio.rate / (double)xava->audio.fftsize;
     }
+
+    if (p->stereo_diff) {
+        REALLOC_SELF(xava->side_ratio, xava->bars);
+        for (uint32_t i = 0; i < xava->bars; i++)
+            xava->side_ratio[i] = 0.0f;
+    }
 }
 
 EXP_FUNC void xavaFilterLoop(XAVA *xava) {
@@ -289,6 +343,17 @@ EXP_FUNC void xavaFilterLoop(XAVA *xava) {
 
         separate_freq_bands(data->outl, 1, p->sens, audio->fftsize, data);
         separate_freq_bands(data->outr, 2, p->sens, audio->fftsize, data);
+    } else if (p->stereo_diff) {
+        for (uint32_t i = 0; i < audio->fftsize; i++) {
+            float l = audio->audio_out_l[i];
+            float r = audio->audio_out_r[i];
+            data->mid[i]  = (l + r) * 0.5f;
+            data->side[i] = (l - r) * 0.5f;
+        }
+        fftwf_execute(data->pl);
+        fftwf_execute(data->pr);
+
+        separate_freq_bands_diff(data->outl, data->outr, p->sens, data);
     } else {
         fftwf_execute(data->pl);
         separate_freq_bands(data->outl, 1, p->sens, audio->fftsize, data);
@@ -321,6 +386,17 @@ EXP_FUNC void xavaFilterLoop(XAVA *xava) {
             }
         } else {
             data->f[i] = data->fl[i];
+        }
+    }
+
+    // channels = difference: hand the side share of every bar to the output
+    if (p->stereo_diff) {
+        for (uint32_t i = 0; i < xava->bars; i++) {
+            uint32_t band = i;
+            // oddoneout spreads the bands over twice as many bars
+            if (data->state.oddoneout && xava->bars > 1)
+                band = (uint64_t)i * (data->calcbars - 1) / (xava->bars - 1);
+            xava->side_ratio[i] = data->sratio[band];
         }
     }
 
@@ -403,9 +479,13 @@ EXP_FUNC void xavaFilterCleanup(XAVA *xava) {
 
     free(data->outl);
     fftwf_destroy_plan(data->pl);
-    if(p->stereo) {
+    if(p->stereo || p->stereo_diff) {
         free(data->outr);
         fftwf_destroy_plan(data->pr);
+    }
+    if(p->stereo_diff) {
+        fftwf_free(data->mid);
+        fftwf_free(data->side);
     }
     fftwf_cleanup();
 
@@ -424,9 +504,11 @@ EXP_FUNC void xavaFilterCleanup(XAVA *xava) {
     arr_free(data->fall);
     arr_free(data->fl);
     arr_free(data->fr);
+    arr_free(data->sratio);
 
     free(xava->bar_freq_lo); xava->bar_freq_lo = NULL;
     free(xava->bar_freq_hi); xava->bar_freq_hi = NULL;
+    free(xava->side_ratio);  xava->side_ratio  = NULL;
 
     free(data);
 }

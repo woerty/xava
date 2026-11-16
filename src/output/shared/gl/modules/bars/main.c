@@ -51,6 +51,12 @@ static GLuint PRE_INTENSITY;
 // this is hacked in, shut up
 static bool shouldRestart;
 
+// channels = difference: colour of the bar part that differs between L and R
+#define DIFFERENCE_DEFAULT_COLOR "#ff9e3d"
+static uint32_t differenceColor;
+static GLfloat  foregroundColor[4];
+static GLfloat  gradientSections;
+
 // renderer hacks and options
 struct gl_renderer_options {
     struct color {
@@ -87,6 +93,31 @@ EXP_FUNC void xava_gl_module_config_load(XAVAGLModule *module, XAVA *xava) {
     xava_gl_module_shader_load(&pre, SGL_PRE, SGL_CONFIG, "", module, xava);
 
     gl_options.bars.mirror = xavaConfigGetBool(pre.config, "bars", "mirror", false);
+
+    char *diff_color = xavaConfigGetString(xava->default_config.config,
+            "color", "difference", DIFFERENCE_DEFAULT_COLOR);
+    if(diff_color == NULL || sscanf(diff_color, "#%x", &differenceColor) != 1) {
+        xavaWarn("[color] difference must look like '#rrggbb', using %s",
+                DIFFERENCE_DEFAULT_COLOR);
+        sscanf(DIFFERENCE_DEFAULT_COLOR, "#%x", &differenceColor);
+    }
+}
+
+// How many extra quads per bar the difference tips need (mirror has two ends)
+static uint32_t difference_quads(XAVA *xava) {
+    if(!xava->conf.stereo_diff)
+        return 0;
+    return gl_options.bars.mirror ? 2 : 1;
+}
+
+static void set_quad(GLfloat *d, float x0, float x1, float y0, float y1) {
+    // same vertex order as the precalculated bars in apply()
+    d[0]  = x0; d[1]  = y1;
+    d[2]  = x0; d[3]  = y0;
+    d[4]  = x1; d[5]  = y0;
+    d[6]  = x1; d[7]  = y1;
+    d[8]  = x1; d[9]  = y0;
+    d[10] = x0; d[11] = y1;
 }
 
 EXP_FUNC void xava_gl_module_init(XAVAGLModuleOptions *options) {
@@ -150,7 +181,7 @@ EXP_FUNC void xava_gl_module_apply(XAVAGLModuleOptions *options) {
     glUseProgram(pre.program);
 
     // reallocate and attach verticies data
-    arr_resize(vertexData, xava->bars*12);
+    arr_resize(vertexData, xava->bars*12*(1+difference_quads(xava)));
     glVertexAttribPointer(PRE_BARS, 2, GL_FLOAT, GL_FALSE, 0, vertexData);
 
     // since most of this information remains untouched, let's precalculate
@@ -191,7 +222,8 @@ EXP_FUNC void xava_gl_module_apply(XAVAGLModuleOptions *options) {
     glUniform1f(PRE_AUDIO_RATE,  (float)conf->inputsize);
 
     u32 gradient_count = arr_count(conf->gradients);
-    glUniform1f(PRE_GRAD_SECT_COUNT, gradient_count ? gradient_count-1 : 0);
+    gradientSections = gradient_count ? gradient_count-1 : 0;
+    glUniform1f(PRE_GRAD_SECT_COUNT, gradientSections);
     glUniform4fv(PRE_GRADIENTS, gradient_count, gradientColor);
 
     // "clear" the screen
@@ -243,6 +275,7 @@ EXP_FUNC void xava_gl_module_clear(XAVAGLModuleOptions *options) {
         fgcol[0], fgcol[1], fgcol[2], fgcol[3]);
 
     glUniform4f(PRE_FGCOL, fgcol[0], fgcol[1], fgcol[2], fgcol[3]);
+    memcpy(foregroundColor, fgcol, sizeof(foregroundColor));
     glUniform4f(PRE_BGCOL, bgcol[0], bgcol[1], bgcol[2], bgcol[3]);
 
     //glClearColor(bgcol[0], bgcol[1], bgcol[2], bgcol[3]);
@@ -258,7 +291,34 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
      * Here we start rendering to the texture
      **/
     register GLfloat *d = vertexData;
-    if(!gl_options.bars.mirror) {
+    uint32_t diffQuads = xava->side_ratio ? difference_quads(xava) : 0;
+    if(diffQuads) {
+        // channels = difference: the common part keeps the normal look,
+        // the share that differs between L and R is drawn on top of it
+        XAVA_CONFIG *conf = &xava->conf;
+        GLfloat *tip = vertexData + xava->bars*12;
+        float center = floor(xava->inner.h/2.0f);
+        for(uint32_t i=0; i<xava->bars; i++) {
+            float x0 = xava->rest + i*(conf->bs+conf->bw);
+            float x1 = x0 + conf->bw;
+            float h  = xava->f[i];
+            float ratio = xava->side_ratio[i];
+            if(ratio < 0.0f) ratio = 0.0f;
+            if(ratio > 1.0f) ratio = 1.0f;
+            float split = h * (1.0f - ratio);
+
+            if(!gl_options.bars.mirror) {
+                set_quad(d,   x0, x1, 0.0f,  split);
+                set_quad(tip, x0, x1, split, h);
+            } else {
+                set_quad(d,      x0, x1, center - split/2, center + split/2 + 1.0f);
+                set_quad(tip,    x0, x1, center + split/2 + 1.0f, center + h/2 + 1.0f);
+                set_quad(tip+12, x0, x1, center - h/2, center - split/2);
+            }
+            d   += 12;
+            tip += 12*diffQuads;
+        }
+    } else if(!gl_options.bars.mirror) {
         for(register uint32_t i=0; i<xava->bars; i++) {
             d[1]  = xava->f[i];
             d[7]  = xava->f[i];
@@ -294,6 +354,21 @@ EXP_FUNC void xava_gl_module_draw(XAVAGLModuleOptions *options) {
 
     // You use the number of verticies, but not the actual polygon count
     glDrawArrays(GL_TRIANGLES, 0, xava->bars*6);
+
+    if(diffQuads) {
+        // plain colour instead of the gradient, then put everything back
+        glUniform1f(PRE_GRAD_SECT_COUNT, 0.0f);
+        glUniform4f(PRE_FGCOL,
+            ARGB_R_32(differenceColor)/255.0,
+            ARGB_G_32(differenceColor)/255.0,
+            ARGB_B_32(differenceColor)/255.0,
+            xava->conf.foreground_opacity);
+
+        glDrawArrays(GL_TRIANGLES, xava->bars*6, xava->bars*6*diffQuads);
+
+        glUniform1f(PRE_GRAD_SECT_COUNT, gradientSections);
+        glUniform4fv(PRE_FGCOL, 1, foregroundColor);
+    }
 
     glDisableVertexAttribArray(PRE_BARS);
 }
